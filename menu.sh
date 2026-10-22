@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Resolve the real directory even when executed via symlink in /usr/local/bin
 SCRIPT_SOURCE="$(readlink -f "${BASH_SOURCE[0]}")"
 APP_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 SVC="traffic-inspector"
 VENV="$APP_DIR/venv"
+CONFIG_FILE="$APP_DIR/config.json"
 GLOBAL_CMD="/usr/local/bin/sahandpolice"
 
 # ANSI Colors
@@ -19,11 +19,39 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-# Ensure shortcut is linked globally
 if [ ! -L "$GLOBAL_CMD" ] || [ "$(readlink -f "$GLOBAL_CMD")" != "$SCRIPT_SOURCE" ]; then
   ln -sf "$SCRIPT_SOURCE" "$GLOBAL_CMD"
   chmod +x "$SCRIPT_SOURCE"
 fi
+
+set_credentials() {
+  echo -e "\n${C}── Set Web Dashboard Credentials ──${N}"
+  read -rp "Enter new username: " new_user
+  while [ -z "$new_user" ]; do
+    echo -e "${R}Username cannot be empty.${N}"
+    read -rp "Enter new username: " new_user
+  done
+
+  read -rp "Enter new password: " new_pass
+  while [ -z "$new_pass" ]; do
+    echo -e "${R}Password cannot be empty.${N}"
+    read -rp "Enter new password: " new_pass
+  done
+
+  cat << EOF > "$CONFIG_FILE"
+{
+  "username": "$new_user",
+  "password": "$new_pass"
+}
+EOF
+  chmod 600 "$CONFIG_FILE"
+  echo -e "${G}[✔] Credentials saved successfully.${N}"
+
+  if systemctl is-active --quiet ${SVC}.service; then
+    systemctl restart ${SVC}.service
+    echo -e "${G}[✔] Service restarted to apply new login details.${N}"
+  fi
+}
 
 install_all() {
   echo -e "\n${C}[1/4] Updating system packages...${N}"
@@ -33,6 +61,11 @@ install_all() {
   [ ! -d "$VENV" ] && python3 -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip
   "$VENV/bin/pip" install -r "$APP_DIR/requirements.txt"
+
+  # Ask for credentials if not yet set
+  if [ ! -f "$CONFIG_FILE" ]; then
+    set_credentials
+  fi
 
   echo -e "${C}[3/4] Registering persistent systemd service...${N}"
   cat << EOF > "/etc/systemd/system/${SVC}.service"
@@ -90,7 +123,6 @@ uninstall_all() {
 
 while true; do
   clear
-  # Status checks
   if systemctl is-active --quiet ${SVC}.service; then
     STAT="${G}● Running${N}"
   else
@@ -108,26 +140,28 @@ while true; do
   echo -e "${B}──────────────────────────────────────────────${N}"
   echo -e " ${B}Traffic Camouflage Inspector${N}"
   echo -e "${B}──────────────────────────────────────────────${N}"
-  echo -e " Status     : $STAT"
-  echo -e " Auto-boot  : $BOOT"
-  echo -e " Panel Link : ${C}http://${IP}:8501${N}"
+  echo -e " Status      : $STAT"
+  echo -e " Auto-boot   : $BOOT"
+  echo -e " Panel Link  : ${C}http://${IP}:8501${N}"
   echo -e " Fast Command: ${B}sahandpolice${N}"
   echo -e "${B}──────────────────────────────────────────────${N}"
   echo -e "  ${B}1${N}) Install / Reinstall & Enable Autostart"
-  echo -e "  ${B}2${N}) Restart Service"
-  echo -e "  ${B}3${N}) Stop Service"
-  echo -e "  ${B}4${N}) View Live Logs"
-  echo -e "  ${B}5${N}) Completely Uninstall"
+  echo -e "  ${B}2${N}) Change Dashboard Username & Password"
+  echo -e "  ${B}3${N}) Restart Service"
+  echo -e "  ${B}4${N}) Stop Service"
+  echo -e "  ${B}5${N}) View Live Logs"
+  echo -e "  ${B}6${N}) Completely Uninstall"
   echo -e "  ${B}0${N}) Exit"
   echo -e "${B}──────────────────────────────────────────────${N}"
-  read -rp " Select [0-5]: " opt
+  read -rp " Select [0-6]: " opt
 
   case $opt in
     1) install_all ;;
-    2) systemctl restart ${SVC}.service && sleep 1 ;;
-    3) systemctl stop ${SVC}.service && sleep 1 ;;
-    4) journalctl -u ${SVC}.service -n 25 --no-pager ; echo "" ; read -rp "Press Enter..." ;;
-    5) uninstall_all ;;
+    2) set_credentials ; read -rp "Press Enter to return to menu..." ;;
+    3) systemctl restart ${SVC}.service && sleep 1 ;;
+    4) systemctl stop ${SVC}.service && sleep 1 ;;
+    5) journalctl -u ${SVC}.service -n 25 --no-pager ; echo "" ; read -rp "Press Enter..." ;;
+    6) uninstall_all ;;
     0) clear; exit 0 ;;
     *) echo -e "${R}Invalid option.${N}"; sleep 0.8 ;;
   esac
