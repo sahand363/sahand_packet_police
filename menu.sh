@@ -12,6 +12,7 @@ G="\033[0;32m"
 R="\033[0;31m"
 C="\033[0;36m"
 B="\033[1m"
+Y="\033[1;33m"
 N="\033[0m"
 
 if [ "$EUID" -ne 0 ]; then
@@ -24,53 +25,49 @@ if [ ! -L "$GLOBAL_CMD" ] || [ "$(readlink -f "$GLOBAL_CMD")" != "$SCRIPT_SOURCE
   chmod +x "$SCRIPT_SOURCE"
 fi
 
-set_credentials() {
-  echo -e "\n${C}── Set Web Dashboard Credentials ──${N}"
-  read -rp "Enter new username: " new_user
-  while [ -z "$new_user" ]; do
-    echo -e "${R}Username cannot be empty.${N}"
-    read -rp "Enter new username: " new_user
-  done
+manage_credentials() {
+  echo -e "\n${C}── Web Dashboard Access Control ──${N}"
+  echo -e "  1) Set or Change Username & Password"
+  echo -e "  2) Remove Password (Open / Public Access)"
+  echo -e "  0) Back"
+  read -rp " Select [0-2]: " cred_choice
 
-  read -rp "Enter new password: " new_pass
-  while [ -z "$new_pass" ]; do
-    echo -e "${R}Password cannot be empty.${N}"
-    read -rp "Enter new password: " new_pass
-  done
-
-  cat << EOF > "$CONFIG_FILE"
-{
-  "username": "$new_user",
-  "password": "$new_pass"
-}
-EOF
-  chmod 600 "$CONFIG_FILE"
-  echo -e "${G}[✔] Credentials saved successfully.${N}"
-
-  if systemctl is-active --quiet ${SVC}.service; then
-    systemctl restart ${SVC}.service
-    echo -e "${G}[✔] Service restarted to apply new login details.${N}"
-  fi
+  case $cred_choice in
+    1)
+      read -rp "Enter username: " new_user
+      read -rp "Enter password: " new_pass
+      if [ -n "$new_user" ] && [ -n "$new_pass" ]; then
+        echo "{\"username\": \"$new_user\", \"password\": \"$new_pass\"}" > "$CONFIG_FILE"
+        chmod 600 "$CONFIG_FILE"
+        echo -e "${G}[✔] Password protection enabled!${N}"
+        systemctl restart ${SVC}.service 2>/dev/null || true
+      else
+        echo -e "${R}Username and password cannot be empty.${N}"
+      fi
+      ;;
+    2)
+      rm -f "$CONFIG_FILE"
+      echo -e "${G}[✔] Password removed. Dashboard is now accessible without login.${N}"
+      systemctl restart ${SVC}.service 2>/dev/null || true
+      ;;
+    *) ;;
+  esac
+  read -rp "Press Enter to return to menu..."
 }
 
 install_all() {
   echo -e "\n${C}[1/4] Updating system packages...${N}"
   apt update -y && apt install -y python3-pip python3-venv tshark libpcap-dev ufw
 
-  echo -e "${C}[2/4] Setting up Python virtual environment in $VENV...${N}"
+  echo -e "${C}[2/4] Setting up Python virtual environment...${N}"
   [ ! -d "$VENV" ] && python3 -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip
   "$VENV/bin/pip" install -r "$APP_DIR/requirements.txt"
 
-  # Ask for credentials if not yet set
-  if [ ! -f "$CONFIG_FILE" ]; then
-    set_credentials
-  fi
-
   echo -e "${C}[3/4] Registering persistent systemd service...${N}"
   cat << EOF > "/etc/systemd/system/${SVC}.service"
 [Unit]
-Description=Traffic Camouflage Inspector
+Description=Sahand Police Traffic Inspector
 After=network.target
 
 [Service]
@@ -92,12 +89,12 @@ EOF
   ufw allow 8501/tcp 2>/dev/null || true
 
   echo -e "\n${G}[✔] Successfully installed!${N}"
-  echo -e "${G}[✔] Runs persistently and will restart automatically on server reboot.${N}"
+  echo -e "${G}[✔] Accessible without login by default. Use Option 2 to add a password anytime.${N}"
   read -rp "Press Enter to return to menu..."
 }
 
 uninstall_all() {
-  echo -e "\n${R}Are you sure you want to completely uninstall this tool? (y/n)${N}"
+  echo -e "\n${R}Are you sure you want to completely uninstall? (y/n)${N}"
   read -rp "Select: " confirm
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
     echo -e "${C}[*] Stopping and disabling service...${N}"
@@ -106,17 +103,15 @@ uninstall_all() {
     rm -f "/etc/systemd/system/${SVC}.service"
     systemctl daemon-reload
 
-    echo -e "${C}[*] Removing sahandpolice command shortcut...${N}"
+    echo -e "${C}[*] Removing shortcut and files...${N}"
     rm -f "$GLOBAL_CMD"
-
-    echo -e "${C}[*] Removing virtual environment and files...${N}"
     rm -rf "$APP_DIR"
     rm -rf /usr/local/bin/venv 2>/dev/null || true
 
-    echo -e "${G}[✔] Uninstallation complete. Everything has been removed.${N}\n"
+    echo -e "${G}[✔] Uninstalled successfully.${N}\n"
     exit 0
   else
-    echo -e "${C}Uninstallation canceled.${N}"
+    echo -e "${C}Canceled.${N}"
     sleep 1
   fi
 }
@@ -135,18 +130,26 @@ while true; do
     BOOT="${R}Disabled${N}"
   fi
 
+  if [ -f "$CONFIG_FILE" ]; then
+    AUTH_STAT="${Y}🔒 Password Protected${N}"
+  else
+    AUTH_STAT="${G}🔓 Open (No Password)${N}"
+  fi
+
   IP=$(hostname -I | awk '{print $1}')
 
   echo -e "${B}──────────────────────────────────────────────${N}"
-  echo -e " ${B}Traffic Camouflage Inspector${N}"
+  echo -e " ${C}${B}               SAHAND POLICE                  ${N}"
+  echo -e " ${B}        Traffic Camouflage Inspector          ${N}"
   echo -e "${B}──────────────────────────────────────────────${N}"
   echo -e " Status      : $STAT"
+  echo -e " Security    : $AUTH_STAT"
   echo -e " Auto-boot   : $BOOT"
   echo -e " Panel Link  : ${C}http://${IP}:8501${N}"
-  echo -e " Fast Command: ${B}sahandpolice${N}"
+  echo -e " Command     : ${B}sahandpolice${N}"
   echo -e "${B}──────────────────────────────────────────────${N}"
   echo -e "  ${B}1${N}) Install / Reinstall & Enable Autostart"
-  echo -e "  ${B}2${N}) Change Dashboard Username & Password"
+  echo -e "  ${B}2${N}) Manage Login (Set / Remove Password)"
   echo -e "  ${B}3${N}) Restart Service"
   echo -e "  ${B}4${N}) Stop Service"
   echo -e "  ${B}5${N}) View Live Logs"
@@ -157,7 +160,7 @@ while true; do
 
   case $opt in
     1) install_all ;;
-    2) set_credentials ; read -rp "Press Enter to return to menu..." ;;
+    2) manage_credentials ;;
     3) systemctl restart ${SVC}.service && sleep 1 ;;
     4) systemctl stop ${SVC}.service && sleep 1 ;;
     5) journalctl -u ${SVC}.service -n 25 --no-pager ; echo "" ; read -rp "Press Enter..." ;;
