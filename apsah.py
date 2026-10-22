@@ -6,7 +6,7 @@ import queue
 import time
 from scapy.all import sniff, TCP, Raw
 
-st.set_page_config(page_title="Traffic Camouflage Inspector", layout="wide")
+st.set_page_config(page_title="Sahand Police - Traffic Inspector", layout="wide")
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
@@ -15,7 +15,10 @@ def get_auth_credentials():
         try:
             with open(CONFIG_PATH, "r") as f:
                 data = json.load(f)
-                return data.get("username"), data.get("password")
+                user = data.get("username", "").strip()
+                pwd = data.get("password", "").strip()
+                if user and pwd:
+                    return user, pwd
         except Exception:
             pass
     return None, None
@@ -33,14 +36,10 @@ if "is_sniffing" not in st.session_state:
 if "log_history" not in st.session_state:
     st.session_state.log_history = []
 
-# --- Authentication ---
-def check_password():
-    valid_user, valid_pass = get_auth_credentials()
+# --- Authentication (Active only if credentials are set) ---
+valid_user, valid_pass = get_auth_credentials()
 
-    if not valid_user or not valid_pass:
-        st.error("⚠️ Credentials are not configured. Run `sahandpolice` in your terminal to set a username and password.")
-        st.stop()
-
+if valid_user and valid_pass:
     def password_entered():
         if (
             st.session_state.get("username") == valid_user
@@ -52,35 +51,27 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
 
-    if "password_correct" not in st.session_state:
+    if "password_correct" not in st.session_state or not st.session_state["password_correct"]:
         st.subheader("🔒 Login Required")
         st.text_input("Username", key="username")
         st.text_input("Password", type="password", key="password")
         st.button("Login", on_click=password_entered)
-        return False
-    elif not st.session_state["password_correct"]:
-        st.subheader("🔒 Login Required")
-        st.text_input("Username", key="username")
-        st.text_input("Password", type="password", key="password")
-        st.button("Login", on_click=password_entered)
-        st.error("😕 Username or password incorrect")
-        return False
-    return True
-
-if not check_password():
-    st.stop()
+        if st.session_state.get("password_correct") is False:
+            st.error("😕 Username or password incorrect")
+        st.stop()
 
 # --- Main Dashboard ---
-st.title("🛡️ Live Traffic & WebSocket Camouflage Inspector")
+st.title("🛡️ Sahand Police — Live Traffic Inspector")
 
 port = st.sidebar.selectbox("Select Port to Monitor", [10001, 10004], index=1, key="selected_port")
 st.sidebar.markdown(f"**Current Status:** Listening on port `{port}`")
 
-if st.sidebar.button("Logout"):
-    st.session_state["password_correct"] = False
-    st.session_state.stop_event.set()
-    st.session_state.is_sniffing = False
-    st.rerun()
+if valid_user and valid_pass:
+    if st.sidebar.button("Logout"):
+        st.session_state["password_correct"] = False
+        st.session_state.stop_event.set()
+        st.session_state.is_sniffing = False
+        st.rerun()
 
 col1, col2, col3 = st.columns([1, 1.5, 1.5])
 col1.metric("Monitored Port", port, "Active")
