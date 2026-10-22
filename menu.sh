@@ -1,6 +1,8 @@
 #!/bin/bash
 
-APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve the real directory even when executed via symlink in /usr/local/bin
+SCRIPT_SOURCE="$(readlink -f "${BASH_SOURCE[0]}")"
+APP_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 SVC="traffic-inspector"
 VENV="$APP_DIR/venv"
 GLOBAL_CMD="/usr/local/bin/sahandpolice"
@@ -18,16 +20,16 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Ensure shortcut is linked globally
-if [ ! -L "$GLOBAL_CMD" ] || [ "$(readlink -f "$GLOBAL_CMD")" != "$APP_DIR/menu.sh" ]; then
-  ln -sf "$APP_DIR/menu.sh" "$GLOBAL_CMD"
-  chmod +x "$APP_DIR/menu.sh"
+if [ ! -L "$GLOBAL_CMD" ] || [ "$(readlink -f "$GLOBAL_CMD")" != "$SCRIPT_SOURCE" ]; then
+  ln -sf "$SCRIPT_SOURCE" "$GLOBAL_CMD"
+  chmod +x "$SCRIPT_SOURCE"
 fi
 
 install_all() {
   echo -e "\n${C}[1/4] Updating system packages...${N}"
   apt update -y && apt install -y python3-pip python3-venv tshark libpcap-dev ufw
 
-  echo -e "${C}[2/4] Setting up Python virtual environment...${N}"
+  echo -e "${C}[2/4] Setting up Python virtual environment in $VENV...${N}"
   [ ! -d "$VENV" ] && python3 -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip
   "$VENV/bin/pip" install -r "$APP_DIR/requirements.txt"
@@ -76,6 +78,7 @@ uninstall_all() {
 
     echo -e "${C}[*] Removing virtual environment and files...${N}"
     rm -rf "$APP_DIR"
+    rm -rf /usr/local/bin/venv 2>/dev/null || true
 
     echo -e "${G}[✔] Uninstallation complete. Everything has been removed.${N}\n"
     exit 0
