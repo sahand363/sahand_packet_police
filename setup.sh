@@ -1,55 +1,63 @@
-#!/bin/bash
+#### 2. Fixed `setup.sh`
+# This version creates a dedicated Python virtual environment (`venv`) to prevent `pip` installation errors and configures systemd to run Streamlit from that environment:
 
-# بررسی دسترسی روت
+```bash
+#!/bin/bash
+set -e
+
+# Verify root privileges
 if [ "$EUID" -ne 0 ]; then
   echo "[-] Please run this script with sudo or as root."
   exit 1
 fi
 
+PROJECT_DIR="$(pwd)"
+APP_FILE="$PROJECT_DIR/apsah.py"
+VENV_DIR="$PROJECT_DIR/venv"
+SERVICE_FILE="/etc/systemd/system/traffic-inspector.service"
+
 echo "[+] Updating system packages..."
 apt update && apt upgrade -y
 
-echo "[+] Installing Python, Pip, and Tshark..."
+echo "[+] Installing system dependencies..."
 apt install -y python3-pip python3-venv tshark libpcap-dev
 
-echo "[+] Installing Python dependencies..."
-pip3 install -r requirements.txt
-
-# گرفتن مسیر دقیق نصب streamlit
-STREAMLIT_PATH=$(which streamlit)
-if [ -z "$STREAMLIT_PATH" ]; then
-  STREAMLIT_PATH="/usr/local/bin/streamlit"
+echo "[+] Setting up Python virtual environment..."
+if [ ! -d "$VENV_DIR" ]; then
+  python3 -m venv "$VENV_DIR"
 fi
 
-# پیدا کردن مسیر فعلی اسکریپت
-PROJECT_DIR="$(pwd)"
-APP_FILE="$PROJECT_DIR/apsah.py"
+echo "[+] Installing Python dependencies..."
+"$VENV_DIR/bin/pip" install --upgrade pip
+"$VENV_DIR/bin/pip" install -r requirements.txt
 
-echo "[+] Configuring Systemd service for continuous running..."
-SERVICE_FILE="/etc/systemd/system/traffic-inspector.service"
+STREAMLIT_BIN="$VENV_DIR/bin/streamlit"
 
+echo "[+] Configuring Systemd service..."
 cat << EOF > "$SERVICE_FILE"
 [Unit]
 Description=Traffic Camouflage Inspector Service
-After=network.service
+After=network.target
 
 [Service]
+Type=simple
 User=root
 WorkingDirectory=$PROJECT_DIR
-ExecStart=$STREAMLIT_PATH run $APP_FILE --server.port=8501 --server.address=0.0.0.0
+ExecStart=$STREAMLIT_BIN run $APP_FILE --server.port=8501 --server.address=0.0.0.0 --server.headless=true
 Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-echo "[+] Enabling and starting the service..."
+echo "[+] Enabling and starting service..."
 systemctl daemon-reload
 systemctl enable traffic-inspector.service
 systemctl restart traffic-inspector.service
 
 echo "--------------------------------------------------------"
 echo "[✔] Setup completed successfully!"
-echo "[✔] You can access the panel via: http://<your-server-ip>:8501"
+echo "[✔] Access your panel at: http://<your-server-ip>:8501"
 echo "[✔] Default Login -> Username: admin | Password: Sahand@2026"
 echo "--------------------------------------------------------"
