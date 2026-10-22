@@ -6,7 +6,6 @@ from scapy.all import sniff, TCP, Raw
 
 st.set_page_config(page_title="Traffic Camouflage Inspector", layout="wide")
 
-# --- Global Queue & Thread Controls ---
 if "packet_queue" not in st.session_state:
     st.session_state.packet_queue = queue.Queue()
 
@@ -19,8 +18,6 @@ if "is_sniffing" not in st.session_state:
 if "log_history" not in st.session_state:
     st.session_state.log_history = []
 
-
-# --- Authentication ---
 def check_password():
     def password_entered():
         if (
@@ -48,11 +45,9 @@ def check_password():
         return False
     return True
 
-
 if not check_password():
     st.stop()
 
-# --- Main Dashboard ---
 st.title("🛡️ Live Traffic & WebSocket Camouflage Inspector")
 
 port = st.sidebar.selectbox("Select Port to Monitor", [10001, 10004], index=1, key="selected_port")
@@ -72,8 +67,6 @@ col3.metric("Packet Status", "Secure / Hidden" if port == 10004 else "Exposed (D
 st.markdown("---")
 st.subheader("📡 Real-time Packet Log Stream")
 
-
-# --- Sniffing Logic (Decoupled from Session State) ---
 def packet_callback(packet, target_port, q):
     if packet.haslayer(TCP) and packet.haslayer(Raw):
         payload = bytes(packet[Raw].load)
@@ -90,7 +83,6 @@ def packet_callback(packet, target_port, q):
 
             q.put(log_entry)
 
-
 def run_sniffing(monitored_port, q, stop_evt):
     try:
         sniff(
@@ -102,7 +94,6 @@ def run_sniffing(monitored_port, q, stop_evt):
     except Exception as e:
         q.put(f"[Error] Sniffing failed: {e}")
 
-
 col_btn1, col_btn2 = st.columns(2)
 start_btn = col_btn1.button("Start Live Capture", disabled=st.session_state.is_sniffing)
 stop_btn = col_btn2.button("Stop Capture", disabled=not st.session_state.is_sniffing)
@@ -110,12 +101,11 @@ stop_btn = col_btn2.button("Stop Capture", disabled=not st.session_state.is_snif
 if start_btn:
     st.session_state.is_sniffing = True
     st.session_state.stop_event.clear()
-    sniff_thread = threading.Thread(
+    threading.Thread(
         target=run_sniffing,
         args=(port, st.session_state.packet_queue, st.session_state.stop_event),
         daemon=True,
-    )
-    sniff_thread.start()
+    ).start()
     st.rerun()
 
 if stop_btn:
@@ -125,14 +115,11 @@ if stop_btn:
 
 log_box = st.empty()
 
-# Continuous update loop when capturing
 if st.session_state.is_sniffing:
     st.caption("🟢 Sniffing active. Polling live packets...")
     while st.session_state.is_sniffing:
-        new_packets = False
         while not st.session_state.packet_queue.empty():
             st.session_state.log_history.append(st.session_state.packet_queue.get())
-            new_packets = True
 
         if st.session_state.log_history:
             log_box.code("\n".join(st.session_state.log_history[-15:]), language="text")
