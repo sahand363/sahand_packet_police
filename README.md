@@ -4,10 +4,10 @@ A real-time packet sniffer and Traffic Camouflage Inspector dashboard built with
 
 ## Installation & Auto-Setup
 
-You can install and run this tool automatically on your Linux server using the setup script:
+Run the following commands on your Linux server:
 
 ```bash
-git clone [https://github.com/sahand333/sahand_packet_police.git](https://github.com/YOUR-USERNAME/traffic-camouflage-inspector.git)
-cd traffic-camouflage-inspector
+git clone [https://github.com/sahand333/sahand_packet_police.git](https://github.com/sahand333/sahand_packet_police.git)
+cd sahand_packet_police
 chmod +x setup.sh
 sudo ./setup.sh
