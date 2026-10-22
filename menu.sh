@@ -1,42 +1,48 @@
 #!/bin/bash
 
-SERVICE_NAME="traffic-inspector"
-SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$PROJECT_DIR/venv"
-STREAMLIT_BIN="$VENV_DIR/bin/streamlit"
-APP_FILE="$PROJECT_DIR/apsah.py"
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SVC="traffic-inspector"
+VENV="$APP_DIR/venv"
+GLOBAL_CMD="/usr/local/bin/sahandpolice"
+
+# ANSI Colors
+G="\033[0;32m"
+R="\033[0;31m"
+C="\033[0;36m"
+B="\033[1m"
+N="\033[0m"
 
 if [ "$EUID" -ne 0 ]; then
-  echo "[-] Please run this script with root privileges (sudo bash menu.sh)"
+  echo -e "${R}Please run with root privileges: sudo sahandpolice${N}"
   exit 1
 fi
 
-install_app() {
-  echo "[+] Updating packages..."
-  apt update -y
-  apt install -y python3-pip python3-venv tshark libpcap-dev ufw
+# Ensure shortcut is linked globally
+if [ ! -L "$GLOBAL_CMD" ] || [ "$(readlink -f "$GLOBAL_CMD")" != "$APP_DIR/menu.sh" ]; then
+  ln -sf "$APP_DIR/menu.sh" "$GLOBAL_CMD"
+  chmod +x "$APP_DIR/menu.sh"
+fi
 
-  echo "[+] Setting up Python virtual environment..."
-  if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv "$VENV_DIR"
-  fi
+install_all() {
+  echo -e "\n${C}[1/4] Updating system packages...${N}"
+  apt update -y && apt install -y python3-pip python3-venv tshark libpcap-dev ufw
 
-  echo "[+] Installing Python dependencies..."
-  "$VENV_DIR/bin/pip" install --upgrade pip
-  "$VENV_DIR/bin/pip" install -r "$PROJECT_DIR/requirements.txt"
+  echo -e "${C}[2/4] Setting up Python virtual environment...${N}"
+  [ ! -d "$VENV" ] && python3 -m venv "$VENV"
+  "$VENV/bin/pip" install --upgrade pip
+  "$VENV/bin/pip" install -r "$APP_DIR/requirements.txt"
 
-  echo "[+] Creating systemd service..."
-  cat << EOF > "$SERVICE_FILE"
+  echo -e "${C}[3/4] Registering persistent systemd service...${N}"
+  cat << EOF > "/etc/systemd/system/${SVC}.service"
 [Unit]
-Description=Traffic Camouflage Inspector Service
+Description=Traffic Camouflage Inspector
 After=network.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=$PROJECT_DIR
-ExecStart=$STREAMLIT_BIN run $APP_FILE --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+WorkingDirectory=$APP_DIR
+ExecStart=$VENV/bin/streamlit run $APP_DIR/apsah.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true
 Restart=always
 RestartSec=3
 
@@ -44,96 +50,82 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
+  echo -e "${C}[4/4] Starting service...${N}"
   systemctl daemon-reload
-  systemctl enable ${SERVICE_NAME}.service
-  systemctl restart ${SERVICE_NAME}.service
+  systemctl enable ${SVC}.service
+  systemctl restart ${SVC}.service
   ufw allow 8501/tcp 2>/dev/null || true
 
-  echo ""
-  echo "=========================================================="
-  echo "[✔] Installed successfully!"
-  echo "[✔] Service is ENABLED on boot and RUNNING right now."
-  echo "[✔] URL: http://$(hostname -I | awk '{print $1}'):8501"
-  echo "=========================================================="
-  read -p "Press Enter to return to menu..."
+  echo -e "\n${G}[✔] Successfully installed!${N}"
+  echo -e "${G}[✔] Runs persistently and will restart automatically on server reboot.${N}"
+  read -rp "Press Enter to return to menu..."
 }
 
-enable_boot() {
-  systemctl enable ${SERVICE_NAME}.service
-  echo "[✔] Auto-start on system boot is now ENABLED."
-  read -p "Press Enter to return to menu..."
-}
+uninstall_all() {
+  echo -e "\n${R}Are you sure you want to completely uninstall this tool? (y/n)${N}"
+  read -rp "Select: " confirm
+  if [[ "$confirm" =~ ^[Yy]$ ]]; then
+    echo -e "${C}[*] Stopping and disabling service...${N}"
+    systemctl stop ${SVC}.service 2>/dev/null || true
+    systemctl disable ${SVC}.service 2>/dev/null || true
+    rm -f "/etc/systemd/system/${SVC}.service"
+    systemctl daemon-reload
 
-disable_boot() {
-  systemctl disable ${SERVICE_NAME}.service
-  echo "[✔] Auto-start on system boot is now DISABLED."
-  read -p "Press Enter to return to menu..."
-}
+    echo -e "${C}[*] Removing sahandpolice command shortcut...${N}"
+    rm -f "$GLOBAL_CMD"
 
-start_service() {
-  systemctl start ${SERVICE_NAME}.service
-  echo "[✔] Service started."
-  read -p "Press Enter to return to menu..."
-}
+    echo -e "${C}[*] Removing virtual environment and files...${N}"
+    rm -rf "$APP_DIR"
 
-stop_service() {
-  systemctl stop ${SERVICE_NAME}.service
-  echo "[✔] Service stopped."
-  read -p "Press Enter to return to menu..."
-}
-
-restart_service() {
-  systemctl restart ${SERVICE_NAME}.service
-  echo "[✔] Service restarted."
-  read -p "Press Enter to return to menu..."
-}
-
-view_status() {
-  systemctl status ${SERVICE_NAME}.service --no-pager
-  echo ""
-  read -p "Press Enter to return to menu..."
-}
-
-view_logs() {
-  journalctl -u ${SERVICE_NAME}.service -n 50 --no-pager
-  echo ""
-  read -p "Press Enter to return to menu..."
+    echo -e "${G}[✔] Uninstallation complete. Everything has been removed.${N}\n"
+    exit 0
+  else
+    echo -e "${C}Uninstallation canceled.${N}"
+    sleep 1
+  fi
 }
 
 while true; do
   clear
-  BOOT_STATUS=$(systemctl is-enabled ${SERVICE_NAME}.service 2>/dev/null || echo "not installed")
-  ACTIVE_STATUS=$(systemctl is-active ${SERVICE_NAME}.service 2>/dev/null || echo "inactive")
+  # Status checks
+  if systemctl is-active --quiet ${SVC}.service; then
+    STAT="${G}● Running${N}"
+  else
+    STAT="${R}○ Inactive${N}"
+  fi
 
-  echo "=================================================="
-  echo "      Traffic Camouflage Inspector Manager        "
-  echo "=================================================="
-  echo " Service Status   : $ACTIVE_STATUS"
-  echo " Autostart on Boot: $BOOT_STATUS"
-  echo " Web Interface    : http://$(hostname -I | awk '{print $1}'):8501"
-  echo "=================================================="
-  echo "1) Full Install / Reinstall & Configure Service"
-  echo "2) Start Dashboard"
-  echo "3) Stop Dashboard"
-  echo "4) Restart Dashboard"
-  echo "5) Enable Auto-Run on Boot (Always Run on Restart)"
-  echo "6) Disable Auto-Run on Boot"
-  echo "7) Check Service Status"
-  echo "8) View Live Logs"
-  echo "9) Exit"
-  echo "=================================================="
-  read -p "Select an option [1-9]: " choice
+  if systemctl is-enabled --quiet ${SVC}.service 2>/dev/null; then
+    BOOT="${G}Enabled${N}"
+  else
+    BOOT="${R}Disabled${N}"
+  fi
 
-  case $choice in
-    1) install_app ;;
-    2) start_service ;;
-    3) stop_service ;;
-    4) restart_service ;;
-    5) enable_boot ;;
-    6) disable_boot ;;
-    7) view_status ;;
-    8) view_logs ;;
-    9) exit 0 ;;
-    *) echo "Invalid option." ; sleep 1 ;;
+  IP=$(hostname -I | awk '{print $1}')
+
+  echo -e "${B}──────────────────────────────────────────────${N}"
+  echo -e " ${B}Traffic Camouflage Inspector${N}"
+  echo -e "${B}──────────────────────────────────────────────${N}"
+  echo -e " Status     : $STAT"
+  echo -e " Auto-boot  : $BOOT"
+  echo -e " Panel Link : ${C}http://${IP}:8501${N}"
+  echo -e " Fast Command: ${B}sahandpolice${N}"
+  echo -e "${B}──────────────────────────────────────────────${N}"
+  echo -e "  ${B}1${N}) Install / Reinstall & Enable Autostart"
+  echo -e "  ${B}2${N}) Restart Service"
+  echo -e "  ${B}3${N}) Stop Service"
+  echo -e "  ${B}4${N}) View Live Logs"
+  echo -e "  ${B}5${N}) Completely Uninstall"
+  echo -e "  ${B}0${N}) Exit"
+  echo -e "${B}──────────────────────────────────────────────${N}"
+  read -rp " Select [0-5]: " opt
+
+  case $opt in
+    1) install_all ;;
+    2) systemctl restart ${SVC}.service && sleep 1 ;;
+    3) systemctl stop ${SVC}.service && sleep 1 ;;
+    4) journalctl -u ${SVC}.service -n 25 --no-pager ; echo "" ; read -rp "Press Enter..." ;;
+    5) uninstall_all ;;
+    0) clear; exit 0 ;;
+    *) echo -e "${R}Invalid option.${N}"; sleep 0.8 ;;
   esac
 done
