@@ -1,3 +1,5 @@
+import os
+import json
 import streamlit as st
 import threading
 import queue
@@ -6,6 +8,19 @@ from scapy.all import sniff, TCP, Raw
 
 st.set_page_config(page_title="Traffic Camouflage Inspector", layout="wide")
 
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+def get_auth_credentials():
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                data = json.load(f)
+                return data.get("username"), data.get("password")
+        except Exception:
+            pass
+    return None, None
+
+# --- Global Queue & Thread Controls ---
 if "packet_queue" not in st.session_state:
     st.session_state.packet_queue = queue.Queue()
 
@@ -18,11 +33,18 @@ if "is_sniffing" not in st.session_state:
 if "log_history" not in st.session_state:
     st.session_state.log_history = []
 
+# --- Authentication ---
 def check_password():
+    valid_user, valid_pass = get_auth_credentials()
+
+    if not valid_user or not valid_pass:
+        st.error("⚠️ Credentials are not configured. Run `sahandpolice` in your terminal to set a username and password.")
+        st.stop()
+
     def password_entered():
         if (
-            st.session_state.get("username") == "admin"
-            and st.session_state.get("password") == "Sahand@2026"
+            st.session_state.get("username") == valid_user
+            and st.session_state.get("password") == valid_pass
         ):
             st.session_state["password_correct"] = True
             del st.session_state["password"]
@@ -48,6 +70,7 @@ def check_password():
 if not check_password():
     st.stop()
 
+# --- Main Dashboard ---
 st.title("🛡️ Live Traffic & WebSocket Camouflage Inspector")
 
 port = st.sidebar.selectbox("Select Port to Monitor", [10001, 10004], index=1, key="selected_port")
