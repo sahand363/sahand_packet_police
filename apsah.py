@@ -63,7 +63,16 @@ if valid_user and valid_pass:
 # --- Main Dashboard ---
 st.title("🛡️ Sahand Police — Live Traffic Inspector")
 
-port = st.sidebar.selectbox("Select Port to Monitor", [10001, 10004], index=1, key="selected_port")
+# Port text/number input allowing any custom port (1 - 65535)
+st.sidebar.markdown("### ⚙️ Port Configuration")
+port = st.sidebar.number_input(
+    "Target Port to Monitor",
+    min_value=1,
+    max_value=65535,
+    value=10004,
+    step=1,
+    key="selected_port"
+)
 st.sidebar.markdown(f"**Current Status:** Listening on port `{port}`")
 
 if valid_user and valid_pass:
@@ -75,7 +84,7 @@ if valid_user and valid_pass:
 
 col1, col2, col3 = st.columns([1, 1.5, 1.5])
 col1.metric("Monitored Port", port, "Active")
-col2.metric("Camouflage Type", "WebSocket (0x82)" if port == 10004 else "Raw TCP")
+col2.metric("Camouflage Type", "WebSocket (0x82)" if port == 10004 else "Custom / Raw TCP")
 col3.metric("Packet Status", "Secure / Hidden" if port == 10004 else "Exposed (DPI)")
 
 st.markdown("---")
@@ -117,7 +126,7 @@ if start_btn:
     st.session_state.stop_event.clear()
     threading.Thread(
         target=run_sniffing,
-        args=(port, st.session_state.packet_queue, st.session_state.stop_event),
+        args=(int(port), st.session_state.packet_queue, st.session_state.stop_event),
         daemon=True,
     ).start()
     st.rerun()
